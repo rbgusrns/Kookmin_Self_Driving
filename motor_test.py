@@ -21,9 +21,9 @@ motor = rospy.Publisher('xycar_motor', XycarMotor, queue_size=1) #xycar_motor í†
 
 while not rospy.is_shutdown():
     for i in range(50):
-        drive(angle=50.0, speed=10.0)
+        drive(angle=0.0, speed=1090.0)
         time.sleep(0.1)
         
     for i in range(60):
-        drive(angle=-50.0, speed=10.0)
+        drive(angle=0.0, speed=1090.0)
         time.sleep(0.1)

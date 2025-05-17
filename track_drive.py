@@ -31,8 +31,8 @@ bridge = CvBridge()  # OpenCV 함수를 사용하기 위한 브릿지
 # 라이다 스캔정보로 그림을 그리기 위한 변수
 #=============================================
 fig, ax = plt.subplots(figsize=(8, 8))
-ax.set_xlim(-120, 120)
-ax.set_ylim(-120, 120)
+ax.set_xlim(-10, 10)
+ax.set_ylim(-10, 10)
 ax.set_aspect('equal')
 lidar_points, = ax.plot([], [], 'bo')
 
@@ -104,7 +104,7 @@ def start():
         cv2.imshow("gray", gray)
 
         if ranges is not None:            
-            angles = np.linspace(0,2*np.pi, len(ranges))+np.pi/2
+            angles = np.linspace(0,2*np.pi, len(ranges))#+np.pi/2
             x = ranges * np.cos(angles)
             y = ranges * np.sin(angles)
 
