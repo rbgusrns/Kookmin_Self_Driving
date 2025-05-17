@@ -26,6 +26,10 @@ print("Camera Ready --------------")
 while not rospy.is_shutdown():
     gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY) #컬러 이미지를 흑백(그레이스케일) 이미지로 변환. 흑백은 계산이 빠름..
     #cvtColor(변환할 이미지, 어떤 색공간으로 바꿀지 지정하는 코드) : 이미지의 색상 공간을 변환하는 함수
+    
     cv2.imshow("original", cv_image)
+    cv2.moveWindow("original", 200, 200)
+    
     cv2.imshow("gray", gray)
+    cv2.moveWindow("gray", 200, 200)
     cv2.waitKey(1) #1ms동안 멈춘 후 반복. 꼭 써야함.
