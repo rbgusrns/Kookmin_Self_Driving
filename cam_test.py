@@ -16,7 +16,8 @@ shape = [0] : 만들 배열의 형태를 지정. [0]은 0개의 요소를 가진
 def img_callback(data):
     global cv_image
     cv_image = bridge.imgmsg_to_cv2(data, "bgr8") #이미지 데이터 토픽을 받아와 cv로 변환. 색상 형식은 bgr 8BIT 형식
-
+    height, width = cv_image.shape[:2]
+    print(f"Image size: {width} x {height}")
 rospy.init_node('cam_test', anonymous=True)
 rospy.Subscriber("/usb_cam/image_raw", Image, img_callback)
                #최상위 토픽  하위 토픽
