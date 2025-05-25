@@ -15,7 +15,7 @@ import signal
 import sys
 import os
 import random
-
+from sinhodeng import sinho_detect #신호등 감지 함수 받아옴
 import matplotlib.pyplot as plt
 
 #=============================================
@@ -40,25 +40,29 @@ lx,ly,rx,ry = [], [], [], []
 # GAUNSSIAN_BLUR_FUNCTION CONST
 KERNEL_SIZE = 5
 
+#노란색 차선 검출.
+LOW_YELLOW  = np.array([20, 100, 100])
+HIGH_YELLOW = np.array([30, 255, 255])
+
 # HSV_FILTERED CONST
-LOW_COLOR = np.array([0, 0, 50])
-HIGH_COLOR = np.array([0, 0, 255])
+LOW_WHITE = np.array([0, 0, 50])
+HIGH_WHITE = np.array([0, 0, 255])
 
 # CANNY_EDGE_DETECTION_FUNCTION CONST
 LOW_THRESHOLD = 100
 HIGH_THRESHOLD = 200
 
 # BIRD_EYE_VIEW_FUNCTION CONST
-SOURCE_POINTS = np.float32([[130, 300], [10, 350], [505, 300], [625, 350]])
+SOURCE_POINTS = np.float32([[210, 300], [40, 438], [425, 300], [595, 453]])
 #                              L_UP       L_DOWN      R_UP       R_DOWN      
-DESTINATION_POINTS = np.float32([[172, 10], [160, 470], [472, 10], [480, 470]])
+DESTINATION_POINTS = np.float32([[160, 10], [160, 470], [480, 10], [480, 470]])
 #                                 L_UP        L_DOWN       R_UP      R_DOWN
 
 # HISTOGRAM_FUNCTION CONST	    # Sampling window 에서 사용하는 상수값을 저장하는 변수.
 nwindows = 8			    # 샘플링할 사각형의 개수.
 margin = 80			        # 샘플링한 사각형의 넓이.
 minpix = 5			        # 검출된 선 배열 기준 값.
-lane_bin_th = 130		    # cv2.threshold 함수의 thresh 지정 임계값. 						
+lane_bin_th = 80		    # cv2.threshold 함수의 thresh 지정 임계값. 						
 
 #DRIVE				        # 주행에 사용되는 상태 확인 변수 및 상수값을 저장하는 변수.
 degree = 0			        # 차선에서 샘플링된 상자들중 두 값을 각각 골라 평균값들의 도출된 각도를 저장하는 변수.
@@ -67,11 +71,13 @@ error = 0
 START_BOX = 1			    # 샘플링하는 두 상자중 차량에서 가까운 상자를 결정하는 상수값을 저장하는 변수.
 TARGET_BOX = 7			    # 샘플링하는 두 상자중 차량에서 먼 상자를 결정하는 상수값을 저장하는 변수.
 CONFIG_ERROR = 8		    # 차량의 목표 진행각도와 비교해 직선과 곡선을 결정하는 상수값을 저장하는 변수.
+CONFIG_DEGREE = 3.0         # 차량의 목표 진행각도와 비교해 직선과 곡선을 결정하는 상수값을 저장하는 변수.
 MAX_DEGREE = 50			    # 목표 진행각도의 최고값을 결정하는 상수값을 저장하는 변수.
-DX_GAIN = 0.2			    # P_GAIN : 각 설정된 상자의 평균X 값의 차인 DX값에 어느 정도를 곱해주어 PD제어에 이용할지를 결정한는 상수값을 저장하는 변수.																	
+DX_GAIN = 0.27              # P_GAIN : 각 설정된 상자의 평균X 값의 차인 DX값에 어느 정도를 곱해주어 PD제어에 이용할지를 결정한는 상수값을 저장하는 변수.																	
 DEGREE_GAIN = 0.203		    # D_GAIN : degree 값에 어느 정도를 곱해주어 PD제어에 이용할지를 결정한는 상수값을 저장하는 변수.
 
 LANE_WIDTH = 320		    # BIRD_EYE_VIEW 를 통해 변환된 차선의 폭 값인 상수값을 저장하는 변수.
+driving_flag = 0            # 차량의 주행 여부를 구분할 변수.
 straight_flag = 1		    # 차선의 직선 여부를 구분할 변수.
 curve_flag = 0			    # 차선의 곡선 여부를 구분할 변수.
 right_flag = 0			    # 차선의 우회전 여부를 구분할 변수.
@@ -104,7 +110,8 @@ def histogram(lane):
     global lx
     global ry
     global ly
-    
+
+
     # lane정보에서 차선인식을 원할하게 하기 위해 histogram화.
     histogram = np.sum(lane[lane.shape[0] // 2:,:], axis=0)
     # Numpy 배열에서, .shape는 배열의 차원을 튜플(height, width)로 반환한다.. 
@@ -115,7 +122,10 @@ def histogram(lane):
     midpoint = np.int(histogram.shape[0] / 2) # x의 중심 좌표. 320정도..
     # 왼쪽과 오른쪽 좌표 찾기
     leftx_current = np.argmax(histogram[:midpoint])  #왼쪽 중에서, 가장 밝기가 밝은 곳의 x좌표 인덱스 찾음.  
+    
     rightx_current = np.argmax(histogram[midpoint:]) + midpoint #절반부터 0인 인덱스이니, 원래 인덱스 찾기.
+    
+    #맨 아래(차랑 가장 가까운) 윈도우의 x좌표를 잡아줌. 이후로 반복문을 돌며 현재의 차선을 기준으로 다음 윈도우를 설정.
     #np.argmax() : 배열중에서 최댓값 인덱스 반환 값이 여러개라면 가장 빠른 인덱스 반환
     # 창의 높이 설정
     window_height = np.int(lane.shape[0] / nwindows)
@@ -151,19 +161,35 @@ def histogram(lane):
         #                 (~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~) (~~~~~~~)(~)
         #                       [True,False,False...]의 불리언 배열. 윈도우 안에 있는가?     의 인덱스   중   
         # 검출된 선 좌표를 배열의 끝에 추가.
+
+        #if window == 3 or window == 2:
+        #    print(good_right_inds)
         left_lane_inds.append(good_left_inds)
         right_lane_inds.append(good_right_inds)
+        #차선이 끊겨 있을 경우 good_left_inds,good_right_inds는 빈 배열임
 
         if len(good_left_inds)>minpix:
-                leftx_current = np.int(np.mean(nz[1][good_left_inds]))
+                leftx_current = np.int(np.mean(nz[1][good_left_inds])) #윈도우에서 처선이라고 생각되는 부분의 중앙 x 좌표
+                
         if len(good_right_inds)>minpix:
                 rightx_current = np.int(np.mean(nz[1][good_right_inds]))
+                
+        #만약 차선이 끊겨있을 경우 leftx_current,rightx_current는 기존의 값을 유지함. 
+        #윈도우는 아래부터 위로 검사하기 때문에 차선이 없을 경우 필연적으로 새로운 윈도우가 빈 배열임.
+        #따라서 차선이 존재할때 곡률을 정해놓아야 함.
         
+        
+        #만약 이전과 현재의 x가 같다면 차선을 인식 못한 것. 
+
         lx.append(leftx_current)
         ly.append((win_yl+win_yh)/2)
 
         rx.append(rightx_current)
         ry.append((win_yl+win_yh)/2)
+
+        #print(lx,rx)
+        # 현재 차선이 끊겨있을 때, 이전의 x좌표를 그대로 물고감. 직선일 때는 상관없으나 곡선일 경우 경로 그리는데 문제 생김..
+        # 곡률을 이어나가서 예상 좌표를 찍어야 함.
 
     # 배열을 1차원으로 합침
     left_lane_inds = np.concatenate(left_lane_inds)
@@ -193,8 +219,9 @@ def Turn_Configuration() :
     # 계산한 값이 음수이고 바깥으로 벌어지는 기울기인 경우에 동작.
     if start_check < 0 and (rx[TARGET_BOX] - rx[START_BOX]) > 0 :
         # 이 경우 직선으로 판단한 것. straight_flag = ON, curve_flag = OFF 으로 설정.
-        straight_flag = 1
-        curve_flag = 0
+        #straight_flag = 1
+        #curve_flag = 0
+        pass
     # 계산한 값이 음수이고 안쪽으로 모아지는 기울기인 경우에 동작.        
     else :
         pass
@@ -306,7 +333,7 @@ def PD_Setup() :
     DX = ((rx[TARGET_BOX] + lx[TARGET_BOX]) / 2) - ((rx[START_BOX] + lx[START_BOX]) / 2)		      # DX : 차량에 가까운 x 좌표들의 평균의 합과 차량에 먼 x 좌표들의 평균의 합의 차.		
     DY = ((ry[START_BOX] + ly[START_BOX]) / 2) - ((ry[TARGET_BOX] + ly[TARGET_BOX]) / 2)		      # DY : 차량에 가까운 y 좌표들의 평균의 합과 차량에 먼 y 좌표들의 평균의 합의 차.
     degree =(math.atan2(DX , DY) * 180) / math.pi if DY else 0                                        # degree : 위에서 구한 DX, DY 를 통해 목표 지점을 향한 각도를 구함. 
-    #print(degree)
+    #print(degree,error)
     error = (WIDTH / 2) - (rx[TARGET_BOX] + lx[TARGET_BOX] + rx[START_BOX] + lx[START_BOX]) / 4       # error : 선택한 상자 4개의 x 좌표값의 평균과 화면 중앙 x 좌표값의 차.
     #print(error)
 	# degree 의 값이 너무 커지는 경우를 막기 위>해 제한함. 계산된 degree 의 값의 크기가 지정해 둔 각도보다 크면 실행.
@@ -321,9 +348,23 @@ def PD_Setup() :
 def Line_Configuration() :
     # 전역변수 선언
     global error
+    global degree
     global straight_flag
     global curve_flag
 
+    # degree 의 크기를 기준으로 직선과 곡선을 구분. degree 의 크기가 지정된 값보다 작으면 실행.
+    if abs(degree) < CONFIG_DEGREE :
+        # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = OFF, straight_flag = ON 으로 설정.
+        curve_flag = 0
+        straight_flag = 1
+
+    # degree 의 크기가 지정된 값보다 큼을 뜻함.
+    else :
+        # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = ON, straight_flag = OFF 으로 설정.
+        curve_flag = 1
+        straight_flag = 0
+    print(error,straight_flag,curve_flag)
+'''
     # error 의 크기를 기준으로 직선과 곡선을 구분. error 의 크기가 지정된 값보다 작으면 실행.
     if abs(error) < CONFIG_ERROR :
         # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = OFF, straight_flag = ON 으로 설정.
@@ -335,7 +376,9 @@ def Line_Configuration() :
         # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = ON, straight_flag = OFF 으로 설정.
         curve_flag = 1
         straight_flag = 0
-
+    print(error,straight_flag,curve_flag)
+'''
+    
 # PD제어를 위한 함수.            
 def PD_Control() :
     # 전역변수 선언 
@@ -357,7 +400,7 @@ def PD_Control() :
     
 	# 직선으로 구분한 경우에도 목표 좌표로의 조향이 필요하므로 조향각을 계산함.
     else :
-        angle = (error * DX_GAIN*0.3 + degree * DEGREE_GAIN*0.3)*0.5
+        angle = (error * DX_GAIN*0.8 + degree * DEGREE_GAIN*0.8)*0.5
 
     #print(angle)
 			
@@ -390,7 +433,7 @@ def start():
     global lx
     global ry
     global ly
-
+    global driving_flag
     #=========================================
     # ROS 노드를 생성하고 초기화 함.
     # 카메라 토픽을 구독하고 모터 토픽을 발행할 것임을 선언
@@ -405,6 +448,13 @@ def start():
     while not image.size == (WIDTH * HEIGHT * 3):
         continue
  
+
+    
+
+    while not driving_flag : #녹색 신호를 받을 때 까지 대기
+        driving_flag = True#sinho_detect(image)
+        print(driving_flag) 
+        time.sleep(0.1)
     #=========================================
     # 메인 루프 
     # 카메라 토픽이 도착하는 주기에 맞춰 한번씩 루프를 돌면서 
@@ -417,19 +467,23 @@ def start():
         raw_img = image.copy()  
         
         # HSV_FILTERED / 특정 색 검출 
-        hsv_filtered = cv2.cvtColor(raw_img, cv2.COLOR_BGR2HSV)
-        color_masked = cv2.inRange(hsv_filtered, LOW_COLOR, HIGH_COLOR)
+        
+        hsv_filtered = cv2.cvtColor(raw_img, cv2.COLOR_BGR2HSV) # 밝기를 뽑아내기 위해 HSV로 변환.
+        mask_yellow = cv2.inRange(hsv_filtered, LOW_YELLOW, HIGH_YELLOW) # 노란색 차선 검출
+        mask_white = cv2.inRange(hsv_filtered, LOW_WHITE, HIGH_WHITE) # 하얀색 차선 검출
+        combined_mask = cv2.bitwise_or(mask_yellow, mask_white) #필터 통합
+
         #cv2.imshow("VVViewer",hsv_filtered)
-        hsv_result = cv2.bitwise_and(raw_img, raw_img, mask = color_masked)
+        hsv_result = cv2.bitwise_and(raw_img, raw_img, mask = combined_mask) # 하얀색과 노란색, 차선만을 뽑아낸 이미지
+        #cv2.imshow("VVViewer",hsv_filtered)
 
-
-        pts = SOURCE_POINTS.reshape((-1, 1, 2)).astype(np.int32)
-        cv2.polylines(raw_img, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
-        #c#v2.imshow("VViewer",raw_img)
+        #pts = SOURCE_POINTS.reshape((-1, 1, 2)).astype(np.int32)
+        #cv2.polylines(raw_img, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
+        #cv2.imshow("VViewer",raw_img)
 
         #dpts = DESTINATION_POINTS.reshape((-1, 1, 2)).astype(np.int32)
        #cv2.polylines(raw_img, [dpts], isClosed=True, color=(0, 255, 255), thickness=2)
-        cv2.imshow("VViewer",raw_img)
+        #cv2.imshow("VVviewer",hsv_result)
 
 
         # BIRD_EYE_VIEW_FUNCTION / 상공에서의 시점 처리
@@ -437,9 +491,13 @@ def start():
         bird_eye_view = cv2.warpPerspective(hsv_result, transform_source, (640, 480))   
 
         # SLIDING_WINDOW / 선 인식
-        _,L,_ = cv2.split(cv2.cvtColor(bird_eye_view, cv2.COLOR_BGR2HLS))
-        #cv2.imshow("VViewer", L)
-        _,lane = cv2.threshold(L, lane_bin_th, 255, cv2.THRESH_BINARY)
+        _,L,_ = cv2.split(cv2.cvtColor(bird_eye_view, cv2.COLOR_BGR2HLS)) #HLS로 변환 후, L(밝기)만 뽑아냄
+
+        #dpts = DESTINATION_POINTS.reshape((-1, 1, 2)).astype(np.int32)
+        #cv2.polylines(L, [dpts], isClosed=True, color=(0, 255, 255), thickness=2)
+
+        #cv2.imshow("VVVViewer", L)
+        _,lane = cv2.threshold(L, lane_bin_th, 255, cv2.THRESH_BINARY) #일정 밝기 이상만 차선으로 검출
         #cv2.imshow("VVViewer", bird_eye_view)
         cv2.waitKey(1)       
 
