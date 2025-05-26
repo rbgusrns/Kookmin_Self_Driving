@@ -28,6 +28,7 @@ class CurveNavigator:
         self.right_line_flag = False
         self.xl,self.yl,self.xr,self.yr = [] , [] , [] , []
         self.rubber_flag = False
+        self.end_flag = False
     @staticmethod
     def cluster_and_average(x, y, dist_thresh=0.4):
         if len(x) == 0:
@@ -79,7 +80,7 @@ class CurveNavigator:
         # 오른쪽, 왼쪽에 점이 있는지 검사. 두개는 있어야함
         #has_r = len(self.xr)>1 
         #has_l = len(self.xl)>1
-        if len(self.yl) and len(self.yr): #둘다 잡았다면 플래그 ON
+        if len(self.yl) and len(self.yr): #둘다 잡았다면 플래그 체크
             self.rubber_check(self.yl[0],self.yr[0])
         
         elif len(self.yl) or len(self.yr): #하나만 잡힌다면 장애물 회피하듯이
@@ -90,7 +91,11 @@ class CurveNavigator:
             self.motor.speed = 20
             self.pub.publish(self.motor)
 
-        else:
+        else: #둘다 못잡았다면 아직 못보거나 다 탈출한 것
+
+            if self.rubber_flag: # 플래그 켜진 상태에서 못본 것이니 탈출한다는 것.
+                self.end_flag = True
+                #print("end")
             self.rubber_flag = False
         
         #print(self.rubber_flag)
