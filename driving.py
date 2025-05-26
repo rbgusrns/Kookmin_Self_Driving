@@ -85,18 +85,9 @@ curve_flag = 0			    # 차선의 곡선 여부를 구분할 변수.
 right_flag = 0			    # 차선의 우회전 여부를 구분할 변수.
 left_flag = 0 			    # 차선의 좌회전 여부를 구분할 변수.
 uphill_flag = 0			    # 도로의 방지턱 여부를 구분할 변수.
-STRAIGHT_VELOCITY = 35		# 차선이 직선일 경우의 속력.
-TURN_VELOCITY = 20		    # 차선이 곡선일 경우의 속력. 
+STRAIGHT_VELOCITY = 60		# 차선이 직선일 경우의 속력.
+TURN_VELOCITY = 35		    # 차선이 곡선일 경우의 속력. 
 
-RUNMODE = 0
-'''
-구간 0: 러버 찾기
-구간 1: 러버
-구간 2: 장애물 찾기
-구간 3: 장애물 회피
-구간 4: 골 찾기
-
-'''
 
 #=============================================
 # 프로그램에서 사용할 상수 선언부
@@ -367,8 +358,8 @@ def Line_Configuration() :
     # degree 의 크기를 기준으로 직선과 곡선을 구분. degree 의 크기가 지정된 값보다 작으면 실행.
     if abs(degree) < CONFIG_DEGREE :
         # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = OFF, straight_flag = ON 으로 설정.
-        curve_flag = 1
-        straight_flag = 0
+        curve_flag = 0
+        straight_flag = 1
 
     # degree 의 크기가 지정된 값보다 큼을 뜻함.
     else :
@@ -403,6 +394,7 @@ def PD_Control() :
     global left_flag	
 
     # 곡선이 경우의 조향각을 계산함.
+    print(straight_flag,curve_flag)
     if curve_flag :
 
         right_flag = 1 if DX > 0 else 0                                  # DX 값이 양수인 경우 우회전임을 뜻하므로 right_flag = ON. 아닌 경우는 OFF.
@@ -412,8 +404,12 @@ def PD_Control() :
     
 	# 직선으로 구분한 경우에도 목표 좌표로의 조향이 필요하므로 조향각을 계산함.
     else :
-        angle = (error * DX_GAIN*0.8 + degree * DEGREE_GAIN*0.8)*0.5
+        #angle = (error * DX_GAIN*0.8 + degree * DEGREE_GAIN*0.8)*0.5
 
+        right_flag = 1 if DX > 0 else 0                                  # DX 값이 양수인 경우 우회전임을 뜻하므로 right_flag = ON. 아닌 경우는 OFF.
+        left_flag = 1 if DX < 0 else 0   
+        angle = abs(error * DX_GAIN + degree * DEGREE_GAIN )
+        angle = -angle if left_flag else angle
     #print(angle)
 			
 
@@ -541,12 +537,16 @@ def start():
     # "이미지처리 +차선위치찾기 +조향각결정 +모터토픽발행" 
     # 작업을 반복적으로 수행함.
     #=========================================
-    while not rospy.is_shutdown():
+    while not rospy.is_shutdown(): #라인 다 통과했으면 탈출하자.
         
         if not Rubber.rubber_flag :
-            lane_follow()
+            lane_follow() #러버 보기 전까지 차선따라가기..
         #print(Rubber.rubber_flag)
+        if Rubber.end_flag:
+            break
 
+    while not rospy.is_shutdown(): #차량 만날때까지 차선따라가기.
+        lane_follow()
 
 
 #=============================================
