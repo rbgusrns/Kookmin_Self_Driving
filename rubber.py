@@ -6,9 +6,11 @@ from sensor_msgs.msg import LaserScan
 from xycar_msgs.msg import XycarMotor
 import matplotlib.pyplot as plt
 
+
+
 class CurveNavigator:
     def __init__(self):
-        rospy.init_node('curve_navigator', anonymous=True)
+        #rospy.init_node('curve_navigator', anonymous=True)
         plt.ion()                          # interactive mode on
         self.fig, self.ax = plt.subplots() #전체 그림 객체와 그래프 개체
         self.sub = rospy.Subscriber("/scan", LaserScan, self.cb_scan)
@@ -19,11 +21,13 @@ class CurveNavigator:
         self.right_sector = (1, 89)    # 45±30
         self.left_sector  = (271, 359)  # 315±30
         self.fit_deg     = 1
-        self.look_ahead  = 0.5
+        self.look_ahead  = 1
         self.K           = 2.05
         self.lane_width  = 0.6
         self.left_line_flag = False
         self.right_line_flag = False
+        self.xl,self.yl,self.xr,self.yr = [] , [] , [] , []
+        self.rubber_flag = False
     @staticmethod
     def cluster_and_average(x, y, dist_thresh=0.4):
         if len(x) == 0:
@@ -61,73 +65,69 @@ class CurveNavigator:
         mask_l = self.sector_mask(ang, self.left_sector) #각도 필터링.. 범위 안에있으면 True, 아니라면 False 로 이루어진 배열
         idy    = np.argsort(y) #x를 기준으로 오름차순 정렬했을 때의 인덱스. x = [5,2,9] 이면 idx[1,0,2] 이런 식으로 나오며, x[idx] 이런식으로 쓰면 정렬한 결과를 실제로 얻을 수 있음.
 
-        xl, yl = x[idy][mask_r[idy]], y[idy][mask_r[idy]] #각도 필터링
-        xr, yr = x[idy][mask_l[idy]], y[idy][mask_l[idy]]
+        self.xl, self.yl = x[idy][mask_r[idy]], y[idy][mask_r[idy]] #각도 필터링
+        self.xr, self.yr = x[idy][mask_l[idy]], y[idy][mask_l[idy]]
         #x[idx] : x를 정렬된 순서로 만든 배열. 
         #mask_r[idx] : mask_r도 x의 정렬 순서에 맞춰 재정렬.
         #x[idx][mask_r[idx]]: 정렬된 x 중에서 mask_r가 True인 것만 뽑음
 
-        xr, yr = self.cluster_and_average(xr, yr) #클러스터링하여 장애물의 평균 점만 뽑아낸 Numpy 배열
-        xl, yl = self.cluster_and_average(xl, yl)
+        self.xr, self.yr = self.cluster_and_average(self.xr, self.yr) #클러스터링하여 장애물의 평균 점만 뽑아낸 Numpy 배열
+        self.xl, self.yl = self.cluster_and_average(self.xl, self.yl)
+
+        
 
         # 오른쪽, 왼쪽에 점이 있는지 검사. 두개는 있어야함
-        has_r = len(xr)>1 
-        has_l = len(xl)>1
-        #print(f"L:{xl[0],yl[0]} R:{xr[0],yr[0]}")
-        xt = self.look_ahead
-
-        '''
-        if has_r and has_l: #둘다 있으면
-            pr = np.polyfit(xr, yr, self.fit_deg)
-            pl = np.polyfit(xl, yl, self.fit_deg)
-            ym = (np.polyval(pr, xt) + np.polyval(pl, xt)) / 2
-               
-            elif has_r: #오른쪽만 있으면
-                pr = np.polyfit(xr, yr, self.fit_deg) 
-                ym = np.polyval(pr, xt) + self.lane_width/2
-            elif has_l: #왼쪽만 있으면
-                pl = np.polyfit(xl, yl, self.fit_deg)
-                ym = np.polyval(pl, xt) - self.lane_width/2
-            
-        else: #둘다 없으면
-            return
-        '''
-        ym = (xl[0] + xr[0]) / 2
-        #print(ym)
-        steer = -np.arctan2(ym, xt) #pure pursuit 알고리즘.
-
-        # --- 그래프 업데이트 ---
-        '''
-        if has_r and has_l:
-           # print("1")
+        #has_r = len(self.xr)>1 
+        #has_l = len(self.xl)>1
+        if len(self.yl) and len(self.yr): #둘다 잡았다면 플래그 ON
+            self.rubber_check(self.yl[0],self.yr[0])
         
-            self.ax.clear()
-            # 오른쪽 점 (빨강), 왼쪽 점 (파랑)
-            if len(xr)>1:
-                self.ax.scatter(xr, yr, label='right clusters', alpha=0.7)
-            if len(xl)>1:
-                self.ax.scatter(xl, yl, label='left clusters', alpha=0.7)
-            # 목표점
-            self.ax.scatter([xt], [ym], marker='x', s=100, label='target point')
-            self.ax.set_xlabel('x (m)')
-            self.ax.set_ylabel('y (m)')
-            self.ax.set_title(f'steer={np.degrees(steer)*self.K:.1f}°')
-            self.ax.legend(loc='upper right')
-            plt.pause(0.001)
-        '''
-        # -----------------------
-        print(ym, steer)
-        self.motor.angle = np.degrees(steer)*self.K
-        #self.motor.angle =0
-        self.motor.speed = 10
-        self.pub.publish(self.motor)
+        elif len(self.yl) or len(self.yr): #하나만 잡힌다면 장애물 회피하듯이
+            ym = (- (self.xl[0]) / 2) if len(self.yl) else (- (self.xr[0]) / 2 )
+            xt = self.look_ahead
+            steer = -np.arctan2(ym, xt)
+            self.motor.angle = np.degrees(steer)*self.K
+            self.motor.speed = 20
+            self.pub.publish(self.motor)
 
+        else:
+            self.rubber_flag = False
+        
+        #print(self.rubber_flag)
+        if self.rubber_flag:
+            #print(f"L:{self.xl[0],self.yl[0]} R:{self.xr[0],self.yr[0]}") # 가장 가까운 점 두개를 잡아 조향한다.
+
+            if abs( self.xl[0] + self.xr[0] ) < 1: # 만약 첫 구조물이 안정화된 상태라면
+                ym = (self.xl[1] + self.xr[1]) / 2 # 더 멀리봐서 핸들을 잡는다.
+                xt = self.look_ahead + 0.5 # pure pursuit 계수 조정
+                print(1)
+
+            else:
+                ym = (self.xl[0] + self.xr[0]) / 2
+                
+                print(abs( self.xl[0] + self.xr[0] ))
+                xt = self.look_ahead
+            steer = -np.arctan2(ym, xt) #pure pursuit 알고리즘.
+            self.motor.angle = np.degrees(steer)*self.K
+            self.motor.speed = 20
+            self.pub.publish(self.motor)
+        
 
     def run(self):
         while not rospy.is_shutdown():
             plt.pause(0.001)
             rospy.sleep(0.01)
 
+    def rubber_check(self,yl,yr):
+        if yl < 1.5 and yr < 1.5:
+            self.rubber_flag = True
+        
+        #if yl < 5 and yr < 5:
+            #self.rubber_flag = False
+
+
+
 if __name__ == '__main__':
     rospy.loginfo("curve_navigator 시작")
     CurveNavigator().run()
+    

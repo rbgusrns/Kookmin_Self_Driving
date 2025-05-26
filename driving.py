@@ -8,6 +8,7 @@ import numpy as np
 import cv2, math
 import rospy, rospkg, time
 from sensor_msgs.msg import Image
+from sensor_msgs.msg import LaserScan
 from cv_bridge import CvBridge
 from xycar_msgs.msg import XycarMotor
 from math import *
@@ -16,6 +17,7 @@ import sys
 import os
 import random
 from sinhodeng import sinho_detect #신호등 감지 함수 받아옴
+from rubber import CurveNavigator
 import matplotlib.pyplot as plt
 
 #=============================================
@@ -71,7 +73,7 @@ error = 0
 START_BOX = 1			    # 샘플링하는 두 상자중 차량에서 가까운 상자를 결정하는 상수값을 저장하는 변수.
 TARGET_BOX = 7			    # 샘플링하는 두 상자중 차량에서 먼 상자를 결정하는 상수값을 저장하는 변수.
 CONFIG_ERROR = 8		    # 차량의 목표 진행각도와 비교해 직선과 곡선을 결정하는 상수값을 저장하는 변수.
-CONFIG_DEGREE = 3.0         # 차량의 목표 진행각도와 비교해 직선과 곡선을 결정하는 상수값을 저장하는 변수.
+CONFIG_DEGREE = 1.0         # 차량의 목표 진행각도와 비교해 직선과 곡선을 결정하는 상수값을 저장하는 변수.
 MAX_DEGREE = 50			    # 목표 진행각도의 최고값을 결정하는 상수값을 저장하는 변수.
 DX_GAIN = 0.27              # P_GAIN : 각 설정된 상자의 평균X 값의 차인 DX값에 어느 정도를 곱해주어 PD제어에 이용할지를 결정한는 상수값을 저장하는 변수.																	
 DEGREE_GAIN = 0.203		    # D_GAIN : degree 값에 어느 정도를 곱해주어 PD제어에 이용할지를 결정한는 상수값을 저장하는 변수.
@@ -83,8 +85,18 @@ curve_flag = 0			    # 차선의 곡선 여부를 구분할 변수.
 right_flag = 0			    # 차선의 우회전 여부를 구분할 변수.
 left_flag = 0 			    # 차선의 좌회전 여부를 구분할 변수.
 uphill_flag = 0			    # 도로의 방지턱 여부를 구분할 변수.
-STRAIGHT_VELOCITY = 50		# 차선이 직선일 경우의 속력.
-TURN_VELOCITY = 35		    # 차선이 곡선일 경우의 속력. 
+STRAIGHT_VELOCITY = 35		# 차선이 직선일 경우의 속력.
+TURN_VELOCITY = 20		    # 차선이 곡선일 경우의 속력. 
+
+RUNMODE = 0
+'''
+구간 0: 러버 찾기
+구간 1: 러버
+구간 2: 장애물 찾기
+구간 3: 장애물 회피
+구간 4: 골 찾기
+
+'''
 
 #=============================================
 # 프로그램에서 사용할 상수 선언부
@@ -200,7 +212,7 @@ def histogram(lane):
     # out_img 확인을 위해 그림 차선을 그림.
     out_img[nz[0][left_lane_inds],nz[1][left_lane_inds]]=[255,0,0]
     out_img[nz[0][right_lane_inds],nz[1][right_lane_inds]]=[0,0,255]
-    cv2.imshow("viewer", out_img)
+    #cv2.imshow("viewer", out_img)
 
 
 # 곡선과 직선을 구분하는 함수.
@@ -355,15 +367,15 @@ def Line_Configuration() :
     # degree 의 크기를 기준으로 직선과 곡선을 구분. degree 의 크기가 지정된 값보다 작으면 실행.
     if abs(degree) < CONFIG_DEGREE :
         # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = OFF, straight_flag = ON 으로 설정.
-        curve_flag = 0
-        straight_flag = 1
+        curve_flag = 1
+        straight_flag = 0
 
     # degree 의 크기가 지정된 값보다 큼을 뜻함.
     else :
         # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = ON, straight_flag = OFF 으로 설정.
         curve_flag = 1
         straight_flag = 0
-    print(error,straight_flag,curve_flag)
+    #print(error,straight_flag,curve_flag)
 '''
     # error 의 크기를 기준으로 직선과 곡선을 구분. error 의 크기가 지정된 값보다 작으면 실행.
     if abs(error) < CONFIG_ERROR :
@@ -419,6 +431,79 @@ def drive(angle, speed):
     #print(angle,speed)
     motor.publish(motor_msg)
 
+
+def lane_follow():
+    global motor, image
+    global rx
+    global lx
+    global ry
+    global ly
+    global driving_flag
+
+    raw_img = image.copy()  
+    
+    # HSV_FILTERED / 특정 색 검출 
+    
+    hsv_filtered = cv2.cvtColor(raw_img, cv2.COLOR_BGR2HSV) # 밝기를 뽑아내기 위해 HSV로 변환.
+    mask_yellow = cv2.inRange(hsv_filtered, LOW_YELLOW, HIGH_YELLOW) # 노란색 차선 검출
+    mask_white = cv2.inRange(hsv_filtered, LOW_WHITE, HIGH_WHITE) # 하얀색 차선 검출
+    combined_mask = cv2.bitwise_or(mask_yellow, mask_white) #필터 통합
+
+    #cv2.imshow("VVViewer",hsv_filtered)
+    hsv_result = cv2.bitwise_and(raw_img, raw_img, mask = combined_mask) # 하얀색과 노란색, 차선만을 뽑아낸 이미지
+    #cv2.imshow("VVViewer",hsv_filtered)
+
+    #pts = SOURCE_POINTS.reshape((-1, 1, 2)).astype(np.int32)
+    #cv2.polylines(raw_img, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
+    #cv2.imshow("VViewer",raw_img)
+
+    #dpts = DESTINATION_POINTS.reshape((-1, 1, 2)).astype(np.int32)
+    #cv2.polylines(raw_img, [dpts], isClosed=True, color=(0, 255, 255), thickness=2)
+    #cv2.imshow("VVviewer",hsv_result)
+
+
+    # BIRD_EYE_VIEW_FUNCTION / 상공에서의 시점 처리
+    transform_source = cv2.getPerspectiveTransform(SOURCE_POINTS, DESTINATION_POINTS)
+    bird_eye_view = cv2.warpPerspective(hsv_result, transform_source, (640, 480))   
+
+    # SLIDING_WINDOW / 선 인식
+    _,L,_ = cv2.split(cv2.cvtColor(bird_eye_view, cv2.COLOR_BGR2HLS)) #HLS로 변환 후, L(밝기)만 뽑아냄
+
+    #dpts = DESTINATION_POINTS.reshape((-1, 1, 2)).astype(np.int32)
+    #cv2.polylines(L, [dpts], isClosed=True, color=(0, 255, 255), thickness=2)
+
+    #cv2.imshow("VVVViewer", L)
+    _,lane = cv2.threshold(L, lane_bin_th, 255, cv2.THRESH_BINARY) #일정 밝기 이상만 차선으로 검출
+    #cv2.imshow("VVViewer", bird_eye_view)
+    cv2.waitKey(1)       
+
+    #=========================================
+    # 핸들조향각 값인 angle값 정하기.
+    # 차선의 위치 정보를 이용해서 angle값을 설정함.        
+    #=========================================
+    # 차선 정보를 불러옴 	
+    histogram(lane)
+    Turn_Configuration()
+
+    # 차선 중앙에서 얼마나 떨어져 있는지를 이용한 PD제어
+    Steer_Configuration()
+    PD_Setup()
+    Line_Configuration()
+    PD_Control()
+
+    #=========================================
+    # 차량의 속도 값인 speed값 정하기.
+    # 직선 코스에서는 빠른 속도로 주행하고 
+    # 회전구간에서는 느린 속도로 주행하도록 설정함.
+    #=========================================
+
+    # 차량의 속력을 제어하는 코드. 직선과 곡선에서 속력을 다르게 입력한다.
+    speed = TURN_VELOCITY if curve_flag else STRAIGHT_VELOCITY
+
+
+    # drive() 호출. drive()함수 안에서 모터 토픽이 발행됨.
+    drive(angle, speed)
+
 #=============================================
 # 실질적인 메인 함수 
 # 카메라 토픽을 받아 각종 영상처리와 알고리즘을 통해
@@ -429,11 +514,9 @@ def start():
     # 위에서 선언한 변수를 start() 안에서 사용하고자 함
     # 전역 변수로 사용하기 위해 global 선언해 준다.
     global motor, image
-    global rx
-    global lx
-    global ry
-    global ly
+
     global driving_flag
+    Rubber = CurveNavigator()
     #=========================================
     # ROS 노드를 생성하고 초기화 함.
     # 카메라 토픽을 구독하고 모터 토픽을 발행할 것임을 선언
@@ -441,19 +524,16 @@ def start():
     rospy.init_node('driving')
     motor = rospy.Publisher('xycar_motor', XycarMotor, queue_size=1)
     image_sub = rospy.Subscriber("/usb_cam/image_raw/",Image,img_callback)
-
+    rubber_sub = rospy.Subscriber("/scan", LaserScan, Rubber.cb_scan)
     print ("----- Xycar self driving -----")
 
     # 첫번째 카메라 토픽이 도착할 때까지 기다림.
     while not image.size == (WIDTH * HEIGHT * 3):
         continue
- 
-
-    
 
     while not driving_flag : #녹색 신호를 받을 때 까지 대기
-        driving_flag = True#sinho_detect(image)
-        print(driving_flag) 
+        driving_flag = 1#sinho_detect(image)
+        #print(driving_flag) 
         time.sleep(0.1)
     #=========================================
     # 메인 루프 
@@ -462,71 +542,12 @@ def start():
     # 작업을 반복적으로 수행함.
     #=========================================
     while not rospy.is_shutdown():
-	#=========================================
-        # 이미지처리를 위해 카메라 원본이미지를 img에 복사 저장
-        raw_img = image.copy()  
         
-        # HSV_FILTERED / 특정 색 검출 
-        
-        hsv_filtered = cv2.cvtColor(raw_img, cv2.COLOR_BGR2HSV) # 밝기를 뽑아내기 위해 HSV로 변환.
-        mask_yellow = cv2.inRange(hsv_filtered, LOW_YELLOW, HIGH_YELLOW) # 노란색 차선 검출
-        mask_white = cv2.inRange(hsv_filtered, LOW_WHITE, HIGH_WHITE) # 하얀색 차선 검출
-        combined_mask = cv2.bitwise_or(mask_yellow, mask_white) #필터 통합
-
-        #cv2.imshow("VVViewer",hsv_filtered)
-        hsv_result = cv2.bitwise_and(raw_img, raw_img, mask = combined_mask) # 하얀색과 노란색, 차선만을 뽑아낸 이미지
-        #cv2.imshow("VVViewer",hsv_filtered)
-
-        #pts = SOURCE_POINTS.reshape((-1, 1, 2)).astype(np.int32)
-        #cv2.polylines(raw_img, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
-        #cv2.imshow("VViewer",raw_img)
-
-        #dpts = DESTINATION_POINTS.reshape((-1, 1, 2)).astype(np.int32)
-       #cv2.polylines(raw_img, [dpts], isClosed=True, color=(0, 255, 255), thickness=2)
-        #cv2.imshow("VVviewer",hsv_result)
+        if not Rubber.rubber_flag :
+            lane_follow()
+        #print(Rubber.rubber_flag)
 
 
-        # BIRD_EYE_VIEW_FUNCTION / 상공에서의 시점 처리
-        transform_source = cv2.getPerspectiveTransform(SOURCE_POINTS, DESTINATION_POINTS)
-        bird_eye_view = cv2.warpPerspective(hsv_result, transform_source, (640, 480))   
-
-        # SLIDING_WINDOW / 선 인식
-        _,L,_ = cv2.split(cv2.cvtColor(bird_eye_view, cv2.COLOR_BGR2HLS)) #HLS로 변환 후, L(밝기)만 뽑아냄
-
-        #dpts = DESTINATION_POINTS.reshape((-1, 1, 2)).astype(np.int32)
-        #cv2.polylines(L, [dpts], isClosed=True, color=(0, 255, 255), thickness=2)
-
-        #cv2.imshow("VVVViewer", L)
-        _,lane = cv2.threshold(L, lane_bin_th, 255, cv2.THRESH_BINARY) #일정 밝기 이상만 차선으로 검출
-        #cv2.imshow("VVViewer", bird_eye_view)
-        cv2.waitKey(1)       
-
-        #=========================================
-        # 핸들조향각 값인 angle값 정하기.
-        # 차선의 위치 정보를 이용해서 angle값을 설정함.        
-        #=========================================
-        # 차선 정보를 불러옴 	
-        histogram(lane)
-        Turn_Configuration()
-
-        # 차선 중앙에서 얼마나 떨어져 있는지를 이용한 PD제어
-        Steer_Configuration()
-        PD_Setup()
-        Line_Configuration()
-        PD_Control()
-
-        #=========================================
-        # 차량의 속도 값인 speed값 정하기.
-        # 직선 코스에서는 빠른 속도로 주행하고 
-        # 회전구간에서는 느린 속도로 주행하도록 설정함.
-        #=========================================
-
-        # 차량의 속력을 제어하는 코드. 직선과 곡선에서 속력을 다르게 입력한다.
-        speed = TURN_VELOCITY if curve_flag else STRAIGHT_VELOCITY
-
-
-        # drive() 호출. drive()함수 안에서 모터 토픽이 발행됨.
-        drive(angle, speed)
 
 #=============================================
 # 메인 함수
