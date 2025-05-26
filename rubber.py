@@ -21,7 +21,7 @@ class CurveNavigator:
         self.right_sector = (1, 89)    # 45±30
         self.left_sector  = (271, 359)  # 315±30
         self.fit_deg     = 1
-        self.look_ahead  = 1
+        self.look_ahead  = 1.3
         self.K           = 2.05
         self.lane_width  = 0.6
         self.left_line_flag = False
@@ -29,6 +29,7 @@ class CurveNavigator:
         self.xl,self.yl,self.xr,self.yr = [] , [] , [] , []
         self.rubber_flag = False
         self.end_flag = False
+        self.rubber_ready_flag = False
     @staticmethod
     def cluster_and_average(x, y, dist_thresh=0.4):
         if len(x) == 0:
@@ -127,8 +128,8 @@ class CurveNavigator:
         if yl < 1.5 and yr < 1.5:
             self.rubber_flag = True
         
-        #if yl < 5 and yr < 5:
-            #self.rubber_flag = False
+        if yl < 5 and yr < 5:
+            self.rubber_ready_flag = True
 
 
 
