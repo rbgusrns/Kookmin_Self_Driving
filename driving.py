@@ -85,10 +85,10 @@ curve_flag = 0			    # 차선의 곡선 여부를 구분할 변수.
 right_flag = 0			    # 차선의 우회전 여부를 구분할 변수.
 left_flag = 0 			    # 차선의 좌회전 여부를 구분할 변수.
 uphill_flag = 0			    # 도로의 방지턱 여부를 구분할 변수.
-STRAIGHT_VELOCITY = 60		# 차선이 직선일 경우의 속력.
-TURN_VELOCITY = 35		    # 차선이 곡선일 경우의 속력. 
-
-
+STRAIGHT_VELO = 60		# 차선이 직선일 경우의 속력.
+TURN_VELO = 40		    # 차선이 곡선일 경우의 속력. 
+straight_vel = STRAIGHT_VELO
+turn_vel = TURN_VELO
 #=============================================
 # 프로그램에서 사용할 상수 선언부
 #=============================================
@@ -435,6 +435,8 @@ def lane_follow():
     global ry
     global ly
     global driving_flag
+    global straight_vel
+    global turn_vel
 
     raw_img = image.copy()  
     
@@ -494,7 +496,7 @@ def lane_follow():
     #=========================================
 
     # 차량의 속력을 제어하는 코드. 직선과 곡선에서 속력을 다르게 입력한다.
-    speed = TURN_VELOCITY if curve_flag else STRAIGHT_VELOCITY
+    speed = turn_vel if curve_flag else straight_vel
 
 
     # drive() 호출. drive()함수 안에서 모터 토픽이 발행됨.
@@ -510,7 +512,7 @@ def start():
     # 위에서 선언한 변수를 start() 안에서 사용하고자 함
     # 전역 변수로 사용하기 위해 global 선언해 준다.
     global motor, image
-
+    global turn_vel, straight_vel
     global driving_flag
     Rubber = CurveNavigator()
     #=========================================
@@ -541,8 +543,14 @@ def start():
         
         if not Rubber.rubber_flag :
             lane_follow() #러버 보기 전까지 차선따라가기..
+        
+        if Rubber.rubber_ready_flag :
+            turn_vel = 30
+            straight_vel = 30
         #print(Rubber.rubber_flag)
         if Rubber.end_flag:
+            turn_vel = TURN_VELO
+            straight_vel = STRAIGHT_VELO
             break
 
     while not rospy.is_shutdown(): #차량 만날때까지 차선따라가기.
