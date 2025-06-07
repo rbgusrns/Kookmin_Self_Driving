@@ -6,7 +6,7 @@ import numpy as np
 def detect_traffic_light(img):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # GREEN 영역 정의 (너가 LOW/HIGH 값 따로 안 줬지만 보통 아래처럼 씀)
+    # GREEN 영역 정의 
     LOW_GREEN  = np.array([45, 100, 100])
     HIGH_GREEN = np.array([75, 255, 255])
 
