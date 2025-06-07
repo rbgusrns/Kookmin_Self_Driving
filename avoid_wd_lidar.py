@@ -12,36 +12,25 @@ import rubber as con
 # 왼쪽 차선일때는 라이다 값을 0~180도 / 오른쪽 차선일 때는 라이다 값을 180~360도 사이의 값을 본다.
 # 라이다 값을 바탕으로 상대차량의 상대 속도 및 거리를 측정한다.
 # 계산했을 때 차량 대략 6m/s로 이동중 > 내 차량 정지시
-# 라이다 인덱스는 0~360까지 차량 전방 기준 반시계방향으로 360개 나눈거임
-
-#########사용 변수 선언##########
-# bridge = CvBridge()  # OpenCV 함수를 사용하기 위한 브릿지
-# right_state = True
-# left_state = 0
-# front_car_vel = 0
-# front_car_dis = 0
-# side_car_flag = 0
-# ranges = [100.0] * 180  # [수정] 최대 안전 확보 (기본값 100으로 초기화, 초기 None 문제 방지)
-# ranges_yet = [0.0] * 180  # [수정] ranges와 같은 길이로 초기화
-# last_time = 0
-# start_overtake_flag = 0
-# speed = 0
-###############################
+# 라이다 인덱스는 0~180까지 차량 전방 기준 왼쪽 90도 부터 오른쪽 90도 까지임
+# 차선 변경 시작은 전방 라이다 값으로 200 이하가 되었을 때 시작
+# 좌우측 라이다 값에 차량이 인식되지 않았을 때 차량 회피 시작
+# 회피도중 차량의 좌우측 라이다 90도 부근에 추월하고자 하는 차량 걸리면 다시 라인 복귀
 
 drive_fn = None
 
-
+'''
+"cal_car_vel"
+>> 차량의 상대속도 및 상대거리 측정 후 차간 거리 유지 및 회피 주행 스타트 플레그 설정 함수
+>> 라이다 센서의 피드백 형식의 코드를 이용하여 상대 거리 측정
+>> 라이다 callback 함수 주기를 측정하여 상대 속도 측정
+>> 상대 거리 9 이상, 좌우측 차량 존재하지 않을 때 차량 회피 시작
+'''
 def cal_car_vel(con):
     #print("cal_vel")
 
     N = len(con.ranges)
 
-    # 전방 인덱스 설정
-    # if con.right_state == True:
-    #     front_indices = range(85, 90)
-    # elif con.left_state == True:
-    #     front_indices = range(0, 5)
-    # else:
     front_indices = range(87, 93)
 
     # 초기화
@@ -86,6 +75,12 @@ def cal_car_vel(con):
             con.speed -= 3
         elif con.front_car_vel >= 0:
             con.speed += 3
+    
+    # 차량 속도 제한 !
+    if con.speed >= 80: 
+        con.speed = 80
+    elif con.speed <= -80:
+        con.speed = -80
 
     # 추월 조건. 앞차량의 거리가 일정거리 이상이고, 옆 차량이 인식안된다면,,,
 
@@ -104,13 +99,13 @@ def car_avoid(con):  # 차량회피 플레그 제어부부
 
         if con.right_state == True: #차량이 오른쪽에 있다면 
 
-            if any(x < 30 for x in con.ranges[140:180]): #오른쪽 끝에 걸치면 다시 차선 따라가기.
+            if any(x < 60 for x in con.ranges[140:180]): #오른쪽 끝에 걸치면 다시 차선 따라가기.
                 con.go_back_flag = True
                 print("R: back to lane")            
 
         elif con.left_state == True:
 
-            if any(x < 30 for x in con.ranges[0:40]):
+            if any(x < 60 for x in con.ranges[0:40]):
                 con.go_back_flag = True
                 print("L: back to lane")
 

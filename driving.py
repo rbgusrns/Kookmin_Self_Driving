@@ -92,7 +92,7 @@ STRAIGHT_VELO = 100		# 차선이 직선일 경우의 속력.
 TURN_VELO = 55		    # 차선이 곡선일 경우의 속력. 
 
 AVOID_VEL = TURN_VELO
-AVOID_ANGLE = 40
+AVOID_ANGLE = 15
 TURN_FASTVEL = TURN_VELO + 30
 straight_vel = STRAIGHT_VELO
 turn_vel = TURN_VELO
@@ -115,6 +115,14 @@ def img_callback(data):
 # 추가된 함수 
 # 차선 정보를 입력받은 뒤 PD 차선의 종류를 구분하고 PD 제어를 통해 조향각을 변경한다.
 #=============================================
+
+'''
+histogram
+슬라이딩 윈도우 방식을 이용하기 위한 히스토그램.
+화면 중반부터 아래를 가로로 8등분 하여, 각 조각의 좌 우 흰색 차선을 검출한다.
+이후 흰색 픽셀이 일정 개수 이상이라면 차선으로 인정, 좌표를 평균내어 차선 중앙의 좌표 하나를 각 조각마다 반환한다
+마지막으로 그 조각들을 이어붙여, 8개의 배열로 나타내 이후 조향, 속도계산에 사용한다.
+'''
 def histogram(lane):
     global rx
     global lx
@@ -127,7 +135,7 @@ def histogram(lane):
     # Numpy 배열에서, .shape는 배열의 차원을 튜플(height, width)로 반환한다.. 
     # ex) (세로,가로) -> (480,640)이므로 lane.shape[0] = 이미지의 세로 길이. 그런데 이것의 절반부터 시작한다고 하니, 화면 절반 아래를 의미. 가로는 전부임.
     # 결국 lane[절반 하단, 가로 전체]인데, np.sum(..., axis=0)에서 axis가 0이라면 세로방향으로 더한다는 뜻.
-    # 즉, histogram은 1차원 배열인데, x = 0 ~ 640 일때 각 열(세로)의 픽셀 값 총합임. 밝은걸 더하겠지..? 
+    # 즉, histogram은 1차원 배열인데, x = 0 ~ 640 일때 각 열(세로)의 픽셀 값 총합임. 밝은걸 더함.
     # 중심좌표 찾기
     midpoint = np.int(histogram.shape[0] / 2) # x의 중심 좌표. 320정도..
     # 왼쪽과 오른쪽 좌표 찾기
@@ -227,7 +235,7 @@ def histogram(lane):
     # out_img 확인을 위해 그림 차선을 그림.
     out_img[nz[0][left_lane_inds],nz[1][left_lane_inds]]=[255,0,0]
     out_img[nz[0][right_lane_inds],nz[1][right_lane_inds]]=[0,0,255]
-    #cv2.imshow("viewer", out_img)
+    cv2.imshow("viewer", out_img)
 
 
 # 곡선과 직선을 구분하는 함수.
@@ -391,20 +399,7 @@ def Line_Configuration() :
         curve_flag = 1
         straight_flag = 0
     #print(error,straight_flag,curve_flag)
-'''
-    # error 의 크기를 기준으로 직선과 곡선을 구분. error 의 크기가 지정된 값보다 작으면 실행.
-    if abs(error) < CONFIG_ERROR :
-        # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = OFF, straight_flag = ON 으로 설정.
-        curve_flag = 0
-        straight_flag = 1
 
-    # error 의 크기가 지정된 값보다 큼을 뜻함.
-    else :
-        # 이 경우 곡선이 아닌 직선으로 판단한 것. curve_flag = ON, straight_flag = OFF 으로 설정.
-        curve_flag = 1
-        straight_flag = 0
-    print(error,straight_flag,curve_flag)
-'''
     
 # PD제어를 위한 함수.            
 def PD_Control() :
@@ -575,8 +570,8 @@ def start():
 
 
     while not driving_flag : #녹색 신호를 받을 때 까지 대기
-        driving_flag = 1#sinho_detect(image)
-        #print(driving_flag) 
+        driving_flag = sinho_detect(image)
+        print(driving_flag) 
         time.sleep(0.1)
     #=========================================
     # 메인 루프 
@@ -622,15 +617,7 @@ def start():
             
             if(Rubber.go_back_flag == True):
                 lane_follow(0)
-                # if((Rubber.start_avoid_flag == True)and(Rubber.right_state == True) and (any(x < 85 for x in Rubber.ranges[75:140]))):
-                #     Rubber.lane_change_flag = True
-                #     Rubber.left_state = True
-                #     Rubber.right_state = False
-                # elif((Rubber.start_avoid_flag == True)and(Rubber.left_state == True) and (any(x < 85 for x in Rubber.ranges[40:105]))):
-                #     Rubber.lane_change_flag = True
-                #     Rubber.left_state = False
-                #     Rubber.right_state = True
-                # else:
+
                 Rubber.lane_change_flag = False
                 Rubber.start_avoid_flag = False #원상복구
                 Rubber.go_back_flag = False #원상복구

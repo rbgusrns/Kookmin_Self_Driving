@@ -50,8 +50,15 @@ class CurveNavigator:
         self.go_back_flag = 0 # 차량이 추월하고자 하는 차량의 어깨에 걸렸을 때 lane fallow 상태로 들어가는 flag
         self.count = 0 #속도 계산 시 횟수 카운트
 
+
+    '''
+    cluster_and_average
+    같은 러버로 예상되는 라이다 값을 뭉쳐 하나의 좌표로 반환.
+    하나의 러버에 하나의 좌표를 추출하기 위함.
+
+    '''
     @staticmethod
-    def cluster_and_average(x, y, dist_thresh=0.4):
+    def cluster_and_average(x, y, dist_thresh=0.4): 
         if len(x) == 0:
             return np.array([]), np.array([])
         points = np.stack((x, y), axis=1) #x,y 각각의 1차원 배열을 묶어 2차원 배열로 만듦. [[x1,y1],[x2,y2]...]
@@ -75,6 +82,13 @@ class CurveNavigator:
         else:
             return (ang >= lo) | (ang <= hi)
 
+
+    '''
+    cb_scan
+    라이다 콜백 함수. 라이다 토픽이 들어오면 이 함수가 호출되고, 
+    이후 자신 기준 좌 우측의 가장 가까운 러버의 중앙을 추종하며 주행한다.
+    이때, 두 러버 모두 비슷한 위치라 안정된 상태라고 판단하면 다음 좌표의 러버들을 보고 주행한다.
+    '''
     def cb_scan(self, msg: LaserScan):
 
         #상대속도 도출 위한 주기 측정#
@@ -157,7 +171,7 @@ class CurveNavigator:
             #print(self.rubber_flag)
             if self.rubber_flag:
                 #print("!!!!!!!!!!!!!!!!!!")
-                #print(f"L:{self.xl[0],self.yl[0]} R:{self.xr[0],self.yr[0]}") # 가장 가까운 점 두개를 잡아 조향한다.
+                print(f"L:{self.xl[0],self.yl[0]} R:{self.xr[0],self.yr[0]}") # 가장 가까운 점 두개를 잡아 조향한다.
 
                 if len(self.xl) >= 2 and len(self.xr) >= 2 and abs(self.xl[0] + self.xr[0]) < 1:  # 만약 첫 구조물이 안정화된 상태라면
                     ym = (self.xl[1] + self.xr[1]) / 2  # 더 멀리봐서 핸들을 잡는다.
@@ -182,6 +196,12 @@ class CurveNavigator:
             plt.pause(0.001)
             rospy.sleep(0.01)
 
+
+    '''
+    rubber_check
+    러버 주행 모드에 진입하기 위한 메서드. 일정거리 이하라면 러버 주행 플래그를 켠다.
+    또한, 높은 속도에서 들어가기 이전에 사전 준비로 속도를 낮추는 작업도 겸한다.
+    '''
     def rubber_check(self,yl,yr):
         if yl < 1.5 and yr < 1.5:
             self.rubber_flag = True
@@ -213,21 +233,7 @@ class CurveNavigator:
 
             if total_front_sum < 200 and not self.lane_change_flag:
 
-                '''
-                    left_sum = sum(lidar_data[i] for i in range(1, 90))
-                    right_sum = sum(lidar_data[j] for j in range(91, 180))
-                    print(left_sum,right_sum)
-                    if left_sum > right_sum: # 내가 왼쪽이라면 오른쪽에 장애물이 위치하므로 가깝게 잡힘. 즉 왼쪽 합이 커짐.
-                        self.lane_change_flag = True
-                        self.left_state = True
-                        self.right_state = False
-                    else:
-                        self.lane_change_flag = True
-                        self.right_state = True
-                        self.left_state = False
-                #flag는 잘 들어옴(라이다 8개가 생각보다 각이 매우 좁음)
-                #print(self.lane_change_flag, self.right_state, self.left_state, total_front_sum)
-                '''
+
                 #오른쪽 스타트일때는 잘 되나, 왼쪽 스타트일때 차가 다 돌지 못한 상태에서 들어가버려 제대로 파악 안됨..
                 #그냥 전방에 장애물 일정거리 이상 가까워졌다고 판단되면 라인 체인지 플래그만 ON 하고 탈출하자..
                 self.lane_change_flag = True
