@@ -5,7 +5,10 @@ import numpy as np
 from sensor_msgs.msg import LaserScan
 from xycar_msgs.msg import XycarMotor
 import matplotlib.pyplot as plt
+import avoid_wd_lidar as avoid
+import time
 
+drive_fn = None
 
 
 class CurveNavigator:
@@ -21,8 +24,8 @@ class CurveNavigator:
         self.right_sector = (1, 89)    # 45±30
         self.left_sector  = (271, 359)  # 315±30
         self.fit_deg     = 1
-        self.look_ahead  = 1.3
-        self.K           = 2.05
+        self.look_ahead  = 1.1
+        self.K           = 1.8
         self.lane_width  = 0.6
         self.left_line_flag = False
         self.right_line_flag = False
@@ -30,6 +33,23 @@ class CurveNavigator:
         self.rubber_flag = False
         self.end_flag = False
         self.rubber_ready_flag = False
+
+        self.lane_change_flag = False # 차선 변경 함수 돌리기 시작하기 위한 flag
+        self.right_state = 0 # 자신이 위치한 차선 판단
+        self.left_state = 0 # 자신이 위치한 차선 판단
+        self.front_car_vel = 0 # 상대 속도
+        self.front_car_dis = 0 # 상대 거리
+        self.side_car_flag = 0 # 추월 시 차량 옆에 존재하는 장애물 판단 flag
+        self.ranges = [100.0] * 180 #라이다 값 전방 180개 받는 list
+        self.ranges_yet = [0.0] * 180 #한 call back 이전 라이다 값 저장 list 
+        self.last_time = 0 # lidar call back 함수의 주기 계산 위한 시간 업데이트 변수 1
+        self.speed = 0 # 차량의 속도 제어 변수
+        self.last_cb_time = None # lidar call back 함수의 주기 게산 위한 시간 업데이트 변수 2
+        self.period = 0 #lidar call back 함수의 주기 담는 변수
+        self.start_avoid_flag = 0 # 차선변경 시작 flag
+        self.go_back_flag = 0 # 차량이 추월하고자 하는 차량의 어깨에 걸렸을 때 lane fallow 상태로 들어가는 flag
+        self.count = 0 #속도 계산 시 횟수 카운트
+
     @staticmethod
     def cluster_and_average(x, y, dist_thresh=0.4):
         if len(x) == 0:
@@ -56,7 +76,18 @@ class CurveNavigator:
             return (ang >= lo) | (ang <= hi)
 
     def cb_scan(self, msg: LaserScan):
+
+        #상대속도 도출 위한 주기 측정#
+        now = time.time()
+
+        if self.last_cb_time is None:
+            self.last_cb_time = now
+        else:
+            self.period = now - self.last_cb_time
+            self.last_cb_time = now
         
+        ############################################
+        global ranges, last_time, front_car_vel, front_car_dis
         ang = np.arange(len(msg.ranges))*msg.angle_increment + msg.angle_min
         r   = np.array(msg.ranges)
         m   = (r>0.1) & (r<5.0) #거리 필터 마스킹.. r이 범위 안에있으면 True, 아니라면 False 로 이루어진 배열
@@ -76,47 +107,74 @@ class CurveNavigator:
         self.xr, self.yr = self.cluster_and_average(self.xr, self.yr) #클러스터링하여 장애물의 평균 점만 뽑아낸 Numpy 배열
         self.xl, self.yl = self.cluster_and_average(self.xl, self.yl)
 
+
+        # ranges 길이 일치 유지 (90개 또는 180개)
+        # if self.right_state == True:
+        #     self.ranges = msg.ranges[90:0:-1]  # 자신의 왼편만 봄 (90개, index 0~89 / 왼쪽 90도부터 정면까지)
+        #     self.ranges = [round(d,2) for d in self.ranges]
+
+        # elif self.left_state == True:
+        #     self.ranges = msg.ranges[359:269:-1]  # 자신의 오른편만 봄 (90개, index 0~89 / 정면부터 오른쪽 90도까지)
+        #     self.ranges = [round(d,2) for d in self.ranges]
+
+        # else:
+        self.ranges = msg.ranges[90:0:-1] + msg.ranges[359:269:-1]  # 전방위 감지 (180개) / 왼쪽 90도 부터 오른쪽 90도까지 [0~90~180 순이다.. 왼 - 정면 - 오]
+        self.ranges = [round(d,2) for d in self.ranges]
+
+        # 전방 차량 감지 시 상대속도 계산 시작
+        if not self.lane_change_flag:
+            self.lane_change_trigger(self.ranges)
+
+        if self.lane_change_flag:
+            avoid.cal_car_vel(self)
+
         
 
         # 오른쪽, 왼쪽에 점이 있는지 검사. 두개는 있어야함
         #has_r = len(self.xr)>1 
         #has_l = len(self.xl)>1
-        if len(self.yl) and len(self.yr): #둘다 잡았다면 플래그 체크
-            self.rubber_check(self.yl[0],self.yr[0])
-        
-        elif len(self.yl) or len(self.yr): #하나만 잡힌다면 장애물 회피하듯이
-            ym = (- (self.xl[0]) / 2) if len(self.yl) else (- (self.xr[0]) / 2 )
-            xt = self.look_ahead
-            steer = -np.arctan2(ym, xt)
-            self.motor.angle = np.degrees(steer)*self.K
-            self.motor.speed = 20
-            self.pub.publish(self.motor)
+        if(self.lane_change_flag == False)and(self.end_flag == False):
+            #print("rubber checking.")
+            if len(self.yl) and len(self.yr): #둘다 잡았다면 플래그 체크
+                self.rubber_check(self.yl[0],self.yr[0])
+            
+            #elif len(self.yl) or len(self.yr): #하나만 잡힌다면 장애물 회피하듯이
+            #    ym = (- (self.xl[0]) / 2) if len(self.yl) else (- (self.xr[0]) / 2 )
+            #    xt = self.look_ahead
+            #    steer = -np.arctan2(ym, xt)
+            #    self.motor.angle = np.degrees(steer)*self.K*0.1
+            #    self.motor.speed = 20
+            #    self.pub.publish(self.motor)
 
-        else: #둘다 못잡았다면 아직 못보거나 다 탈출한 것
+            else: #둘다 못잡았다면 아직 못보거나 다 탈출한 것
 
-            if self.rubber_flag: # 플래그 켜진 상태에서 못본 것이니 탈출한다는 것.
-                self.end_flag = True
-                #print("end")
-            self.rubber_flag = False
-        
-        #print(self.rubber_flag)
-        if self.rubber_flag:
-            #print(f"L:{self.xl[0],self.yl[0]} R:{self.xr[0],self.yr[0]}") # 가장 가까운 점 두개를 잡아 조향한다.
+                if self.rubber_flag: # 플래그 켜진 상태에서 못본 것이니 탈출한다는 것.
+                    self.end_flag = True
 
-            if abs( self.xl[0] + self.xr[0] ) < 1: # 만약 첫 구조물이 안정화된 상태라면
-                ym = (self.xl[1] + self.xr[1]) / 2 # 더 멀리봐서 핸들을 잡는다.
-                xt = self.look_ahead + 0.5 # pure pursuit 계수 조정
-                print(1)
+                    print("end")
+                self.rubber_flag = False
+            
+            #print(self.rubber_flag)
+            if self.rubber_flag:
+                #print("!!!!!!!!!!!!!!!!!!")
+                #print(f"L:{self.xl[0],self.yl[0]} R:{self.xr[0],self.yr[0]}") # 가장 가까운 점 두개를 잡아 조향한다.
 
-            else:
-                ym = (self.xl[0] + self.xr[0]) / 2
-                
-                print(abs( self.xl[0] + self.xr[0] ))
-                xt = self.look_ahead
-            steer = -np.arctan2(ym, xt) #pure pursuit 알고리즘.
-            self.motor.angle = np.degrees(steer)*self.K
-            self.motor.speed = 20
-            self.pub.publish(self.motor)
+                if len(self.xl) >= 2 and len(self.xr) >= 2 and abs(self.xl[0] + self.xr[0]) < 1:  # 만약 첫 구조물이 안정화된 상태라면
+                    ym = (self.xl[1] + self.xr[1]) / 2  # 더 멀리봐서 핸들을 잡는다.
+                    xt = self.look_ahead + 0.5  # pure pursuit 계수 조정. 더 멀리 보고 가야 하니까 !!
+                    #print(1)
+                elif (len(self.xl) >= 1) and (len(self.xr) >= 1):
+                    
+                    ym = (self.xl[0] + self.xr[0]) / 2
+                    xt = self.look_ahead
+
+                else:
+                    pass
+
+                steer = -np.arctan2(ym, xt)  # pure pursuit 알고리즘
+                self.motor.angle = np.degrees(steer) * self.K
+                self.motor.speed = 25
+                self.pub.publish(self.motor)
         
 
     def run(self):
@@ -130,6 +188,58 @@ class CurveNavigator:
         
         if yl < 5 and yr < 5:
             self.rubber_ready_flag = True
+
+    
+    '''
+    차량 회피 구간 진입 시 발동.
+    전방에 일정거리 이하로 차량이 들어오면 라인 변경 플래그 ON.
+    차와의 거리에 따라 자신의 차선이 왼쪽인지 오른쪽인지 판단 후, 플래그를 ON 하는 메서드.
+    '''
+    def lane_change_trigger(self, lidar_data): 
+        # 기본적으로 rubber 중이면 무조건 트리거 꺼놓기
+        if self.rubber_flag:
+            return False
+
+        # lidar_data 확인
+        lidar_data = self.ranges
+        
+
+        if not self.lane_change_flag:
+            # 전방 거리 평균 사용 (단일 튀는 값보다는 평균이 안전함)
+            #print("checking start.")
+            front_left_sum = sum(lidar_data[i] for i in range(87, 91))
+            front_right_sum = sum(lidar_data[j] for j in range(91, 95))
+            total_front_sum = (front_left_sum + front_right_sum)
+
+            if total_front_sum < 200 and not self.lane_change_flag:
+
+                '''
+                    left_sum = sum(lidar_data[i] for i in range(1, 90))
+                    right_sum = sum(lidar_data[j] for j in range(91, 180))
+                    print(left_sum,right_sum)
+                    if left_sum > right_sum: # 내가 왼쪽이라면 오른쪽에 장애물이 위치하므로 가깝게 잡힘. 즉 왼쪽 합이 커짐.
+                        self.lane_change_flag = True
+                        self.left_state = True
+                        self.right_state = False
+                    else:
+                        self.lane_change_flag = True
+                        self.right_state = True
+                        self.left_state = False
+                #flag는 잘 들어옴(라이다 8개가 생각보다 각이 매우 좁음)
+                #print(self.lane_change_flag, self.right_state, self.left_state, total_front_sum)
+                '''
+                #오른쪽 스타트일때는 잘 되나, 왼쪽 스타트일때 차가 다 돌지 못한 상태에서 들어가버려 제대로 파악 안됨..
+                #그냥 전방에 장애물 일정거리 이상 가까워졌다고 판단되면 라인 체인지 플래그만 ON 하고 탈출하자..
+                self.lane_change_flag = True
+                front_left_sum = 0
+                front_right_sum = 0
+                total_front_sum = 0
+
+                
+                return self.lane_change_flag
+            
+            
+
 
 
 

@@ -19,6 +19,9 @@ import random
 from sinhodeng import sinho_detect #신호등 감지 함수 받아옴
 from rubber import CurveNavigator
 import matplotlib.pyplot as plt
+import avoid_wd_lidar as avoid # 차량 회피 받아옴
+
+Rubber = CurveNavigator()
 
 #=============================================
 # 터미널에서 Ctrl-C 키입력으로 프로그램 실행을 끝낼 때
@@ -85,8 +88,12 @@ curve_flag = 0			    # 차선의 곡선 여부를 구분할 변수.
 right_flag = 0			    # 차선의 우회전 여부를 구분할 변수.
 left_flag = 0 			    # 차선의 좌회전 여부를 구분할 변수.
 uphill_flag = 0			    # 도로의 방지턱 여부를 구분할 변수.
-STRAIGHT_VELO = 60		# 차선이 직선일 경우의 속력.
-TURN_VELO = 40		    # 차선이 곡선일 경우의 속력. 
+STRAIGHT_VELO = 100		# 차선이 직선일 경우의 속력.
+TURN_VELO = 55		    # 차선이 곡선일 경우의 속력. 
+
+AVOID_VEL = TURN_VELO
+AVOID_ANGLE = 40
+TURN_FASTVEL = TURN_VELO + 30
 straight_vel = STRAIGHT_VELO
 turn_vel = TURN_VELO
 #=============================================
@@ -142,6 +149,8 @@ def histogram(lane):
     right_lane_inds = []
 
     lx,ly,rx,ry = [], [], [], []
+    l_count = 0
+    r_count = 0 # 현재 왼쪽인지 오른쪽인지 구분하기 위한 변수.
     out_img = np.dstack((lane,lane,lane))*255
     # window를 생성, 차선 시각화
     for window in range(nwindows): #y값은 아래로 내려갈 수록 커진다. window가 0일때 가장 아래임. 세로:480, 윈도우 개수는 8이므로 크기는 60
@@ -173,9 +182,11 @@ def histogram(lane):
 
         if len(good_left_inds)>minpix:
                 leftx_current = np.int(np.mean(nz[1][good_left_inds])) #윈도우에서 처선이라고 생각되는 부분의 중앙 x 좌표
+                l_count += 1
                 
         if len(good_right_inds)>minpix:
                 rightx_current = np.int(np.mean(nz[1][good_right_inds]))
+                r_count += 1
                 
         #만약 차선이 끊겨있을 경우 leftx_current,rightx_current는 기존의 값을 유지함. 
         #윈도우는 아래부터 위로 검사하기 때문에 차선이 없을 경우 필연적으로 새로운 윈도우가 빈 배열임.
@@ -184,9 +195,22 @@ def histogram(lane):
         
         #만약 이전과 현재의 x가 같다면 차선을 인식 못한 것. 
 
+        if (r_count>l_count): #만약 오른쪽의 차선이 왼쪽보다 많다면 지금 오른쪽 차선에 있다는 것.
+            Rubber.right_state = True
+            Rubber.left_state = False
+            #print("R")
+
+        elif (r_count<l_count):
+            Rubber.left_state = True
+            Rubber.right_state = False
+            #print("L")
+
+        else:
+            pass
+    
         lx.append(leftx_current)
         ly.append((win_yl+win_yh)/2)
-
+        
         rx.append(rightx_current)
         ry.append((win_yl+win_yh)/2)
 
@@ -394,7 +418,7 @@ def PD_Control() :
     global left_flag	
 
     # 곡선이 경우의 조향각을 계산함.
-    print(straight_flag,curve_flag)
+    #print(straight_flag,curve_flag)
     if curve_flag :
 
         right_flag = 1 if DX > 0 else 0                                  # DX 값이 양수인 경우 우회전임을 뜻하므로 right_flag = ON. 아닌 경우는 OFF.
@@ -427,8 +451,10 @@ def drive(angle, speed):
     #print(angle,speed)
     motor.publish(motor_msg)
 
+avoid.drive_fn = drive
 
-def lane_follow():
+def lane_follow(avoid_speed):
+    #print("l")
     global motor, image
     global rx
     global lx
@@ -437,6 +463,8 @@ def lane_follow():
     global driving_flag
     global straight_vel
     global turn_vel
+    global right_flag
+    global left_flag
 
     raw_img = image.copy()  
     
@@ -496,10 +524,26 @@ def lane_follow():
     #=========================================
 
     # 차량의 속력을 제어하는 코드. 직선과 곡선에서 속력을 다르게 입력한다.
-    speed = turn_vel if curve_flag else straight_vel
+    if(Rubber.start_avoid_flag == False):
+
+        if curve_flag:
+            if Rubber.right_state and left_flag: #흰 차선이 바깥쪽이라면 속도를 더 낼수 있음 !!
+                speed = TURN_FASTVEL
+            
+            elif Rubber.left_state and right_flag:
+                speed = TURN_FASTVEL
+
+            else:
+                speed = turn_vel
+        
+        else:
+            speed = straight_vel
+    else:
+        speed = avoid_speed
 
 
     # drive() 호출. drive()함수 안에서 모터 토픽이 발행됨.
+    # print(angle,speed)
     drive(angle, speed)
 
 #=============================================
@@ -514,7 +558,6 @@ def start():
     global motor, image
     global turn_vel, straight_vel
     global driving_flag
-    Rubber = CurveNavigator()
     #=========================================
     # ROS 노드를 생성하고 초기화 함.
     # 카메라 토픽을 구독하고 모터 토픽을 발행할 것임을 선언
@@ -527,7 +570,9 @@ def start():
 
     # 첫번째 카메라 토픽이 도착할 때까지 기다림.
     while not image.size == (WIDTH * HEIGHT * 3):
-        continue
+        print("[Waiting for image...] current size:", image.size)
+        time.sleep(0.1)
+
 
     while not driving_flag : #녹색 신호를 받을 때 까지 대기
         driving_flag = 1#sinho_detect(image)
@@ -541,20 +586,67 @@ def start():
     #=========================================
     while not rospy.is_shutdown(): #라인 다 통과했으면 탈출하자.
         
-        if not Rubber.rubber_flag :
-            lane_follow() #러버 보기 전까지 차선따라가기..
+        if ((not Rubber.rubber_flag) and (not Rubber.lane_change_flag)) :
+            
+            lane_follow(0) #러버 보기 전까지 차선따라가기..
         
         if Rubber.rubber_ready_flag :
             turn_vel = 30
             straight_vel = 30
-        #print(Rubber.rubber_flag)
+        
         if Rubber.end_flag:
             turn_vel = TURN_VELO
             straight_vel = STRAIGHT_VELO
-            break
+            Rubber.rubber_flag = False
+            
+        #print(Rubber.end_flag)
+        ##################################################여기부터 차량 회피 구간 !!#########################################################
+        # 전방 차량 감지 시 상대속도 계산 시작
+        if(Rubber.lane_change_flag == True):
+            if (Rubber.start_avoid_flag == False): #장애물을 회피하지 않을 때에는 차선인식.
+                #print("!!!!!")
+                current_speed = avoid.cal_car_vel(Rubber)
+                #print(current_speed)
+                lane_follow(current_speed)
+            
+            # 차량 회피 플레그 들어오면 틀어서 회피주행 시작
+            if((Rubber.start_avoid_flag == True)and(Rubber.right_state == True)and(Rubber.go_back_flag == False)):
+                print("move to L")
+                drive(-AVOID_ANGLE,AVOID_VEL)
+                time.sleep(0.1)
 
-    while not rospy.is_shutdown(): #차량 만날때까지 차선따라가기.
-        lane_follow()
+            elif((Rubber.start_avoid_flag == True)and(Rubber.left_state == True)and(Rubber.go_back_flag == False)):
+                print("move to R")
+                drive(AVOID_ANGLE,AVOID_VEL)
+                time.sleep(0.1)
+            
+            if(Rubber.go_back_flag == True):
+                lane_follow(0)
+                # if((Rubber.start_avoid_flag == True)and(Rubber.right_state == True) and (any(x < 85 for x in Rubber.ranges[75:140]))):
+                #     Rubber.lane_change_flag = True
+                #     Rubber.left_state = True
+                #     Rubber.right_state = False
+                # elif((Rubber.start_avoid_flag == True)and(Rubber.left_state == True) and (any(x < 85 for x in Rubber.ranges[40:105]))):
+                #     Rubber.lane_change_flag = True
+                #     Rubber.left_state = False
+                #     Rubber.right_state = True
+                # else:
+                Rubber.lane_change_flag = False
+                Rubber.start_avoid_flag = False #원상복구
+                Rubber.go_back_flag = False #원상복구
+                Rubber.left_state = False
+                Rubber.right_state = False
+                time.sleep(0.1)
+
+                
+
+        
+
+
+    # while not rospy.is_shutdown(): #차량 만날때까지 차선따라가기.
+    #     lane_follow()
+        
+    #     #avoid_wd_lidar.lane_change_trigger(avoid_wd_lidar.ranges) #라이다 값으로 차량 회피 트리거
 
 
 #=============================================
