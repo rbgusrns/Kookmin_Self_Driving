@@ -35,4 +35,4 @@ def sinho_detect(img):
     output, dets = detect_traffic_light(img)
     if dets and dets[0][0] == "GREEN":
         return True
-    return False
+    return True

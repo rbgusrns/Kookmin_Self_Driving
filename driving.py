@@ -284,7 +284,7 @@ def Steer_Configuration() :
     else :
         pass
     
-    # 차선의 없음을 인식하는 코드. 왼쪽 차선의 x 값들의 합이 0 또는 오른쪽 차>선의 x 값들의 합이 640인 경우에 empty_line_flag = ON.
+    # 차선의 없음을 인식하는 코드. 왼쪽 차선의 x 값들의 합이 0 또는 오른쪽 차선의 x 값들의 합이 640인 경우에 empty_line_flag = ON.
     empty_line_flag = 1 if sum(lx) == 0  or sum(rx)/len(rx) == (WIDTH/2) else 0
     
 	# 차선의 겹쳐짐을 인식하는 코드. 왼쪽 차선의 x 값>과 오른쪽 차선의 x 값이 같은 경우 fusion_line_flag = ON.
@@ -300,7 +300,7 @@ def Steer_Configuration() :
             lx[TARGET_BOX] = rx[TARGET_BOX] - LANE_WIDTH
             lx[START_BOX] = rx[START_BOX] - LANE_WIDTH
 
-        # 왼쪽 차선이 인식되어 있고, 왼쪽 차선의 x 값이 화면 중앙의 값보다 작으면 실행.
+        # 왼쪽 차선이 인식되어 있고, 왼쪽 차선의 x 값이 화면 중앙의 값보다 작으면 실행. 국민대 대회에서는 이곳에 들어올 일이 없다.. AMET을 위해서는 좀 손봐야할듯.
         elif sum(lx) and (sum(lx) / len(lx)) < (WIDTH/2) : 
             # 오른쪽 차선의 x 값을 왼쪽 차선 x 값에서 차선폭 길이만큼 더해줌. 
             rx[TARGET_BOX] = lx[TARGET_BOX] + LANE_WIDTH
@@ -315,7 +315,7 @@ def Steer_Configuration() :
         pass
     
     
-    # 두 선이 중복 출력될 경우  
+    # 두 선이 중복 출력될 경우  뭔가 중앙에서 선이 잡혀서 애매하게 판단될떄 인듯 .. 만약 오른쪽이 
     if fusion_line_flag : 
         
 		# 기준이 되는 사각형 중 차량에서 먼쪽의 x 값이 화면의 중심의 값보다 작을 경우 실행.
@@ -332,8 +332,9 @@ def Steer_Configuration() :
 
     else :
         pass
-    
+    # 겹치는 상황이나 한쪽만 인식한 상황에서는 아래의 분기에 안들어간다. 이미 새로 라인을 그렸기 때문 ..
     # 인식된 두 차선간 거리가 LANE_WIDTH * 0.8 보다 작은 경우
+    # 무슨 상황일까...
     if (rx[START_BOX] - lx[START_BOX]) < (LANE_WIDTH * 0.8) :
         
 		# 사각형 먼쪽의 x의 평균값이 화면 넓이의 절반보다 작은 경우 실행.
@@ -341,12 +342,14 @@ def Steer_Configuration() :
             # 왼쪽 차선의 x 값에 차선 폭만큼 더해 오른쪽 차선의 x 값에 대입.
             rx[TARGET_BOX] = lx[TARGET_BOX] + LANE_WIDTH
             rx[START_BOX] = lx[START_BOX] + LANE_WIDTH
+            #print("L")
 
         # 사각형 먼쪽의 x의 평균갑이 화면 넓이의 절반보다 큰 경우 실행.
         elif ((rx[START_BOX] + lx[START_BOX]) / 2) > (WIDTH / 2) :
             # 왼쪽 차선의 x 값에 차선 폭만큼 더해 오른쪽 차선의 x 값에 대입.
             lx[TARGET_BOX] = rx[TARGET_BOX] - LANE_WIDTH
             lx[START_BOX] = rx[START_BOX] - LANE_WIDTH
+            #print("R")
 
     else : 
         pass
@@ -427,7 +430,7 @@ def PD_Control() :
 
         right_flag = 1 if DX > 0 else 0                                  # DX 값이 양수인 경우 우회전임을 뜻하므로 right_flag = ON. 아닌 경우는 OFF.
         left_flag = 1 if DX < 0 else 0   
-        angle = abs(error * DX_GAIN + degree * DEGREE_GAIN )
+        angle = abs(error * DX_GAIN + degree * DEGREE_GAIN ) #직진일때 핸들 무겁게 해야할까..?
         angle = -angle if left_flag else angle
     #print(angle)
 			
