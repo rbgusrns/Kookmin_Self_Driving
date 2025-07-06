@@ -131,6 +131,7 @@ def histogram(lane):
 
 
     # lane정보에서 차선인식을 원할하게 하기 위해 histogram화.
+    t0 = time.perf_counter()
     histogram = np.sum(lane[lane.shape[0] // 2:,:], axis=0)
     # Numpy 배열에서, .shape는 배열의 차원을 튜플(height, width)로 반환한다.. 
     # ex) (세로,가로) -> (480,640)이므로 lane.shape[0] = 이미지의 세로 길이. 그런데 이것의 절반부터 시작한다고 하니, 화면 절반 아래를 의미. 가로는 전부임.
@@ -142,6 +143,10 @@ def histogram(lane):
     leftx_current = np.argmax(histogram[:midpoint])  #왼쪽 중에서, 가장 밝기가 밝은 곳의 x좌표 인덱스 찾음.  
     
     rightx_current = np.argmax(histogram[midpoint:]) + midpoint #절반부터 0인 인덱스이니, 원래 인덱스 찾기.
+
+
+    t1 = time.perf_counter()
+    print(f" Histogram: {(t1-t0)*1000:.2f} ms")
     
     #맨 아래(차랑 가장 가까운) 윈도우의 x좌표를 잡아줌. 이후로 반복문을 돌며 현재의 차선을 기준으로 다음 윈도우를 설정.
     #np.argmax() : 배열중에서 최댓값 인덱스 반환 값이 여러개라면 가장 빠른 인덱스 반환
