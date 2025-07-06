@@ -36,6 +36,7 @@ bridge = CvBridge()
 motor = None  # 모터 토픽을 담을 변수
 lx, ly, rx, ry = [], [], [], []
 left_state, right_state = 1, 0
+prev_time = 0
 #=============================================
 # 상수 선언부
 #=============================================
@@ -63,8 +64,8 @@ CONFIG_DEGREE = 1.0
 
 # 속도 설정
 STRAIGHT_VELO = 100
-TURN_VELO     = 100
-TURN_FASTVEL  = TURN_VELO #+ 30
+TURN_VELO     = 55
+TURN_FASTVEL  = TURN_VELO + 30
 
 # 카메라 및 이미지 크기
 CAM_FPS = 30
@@ -99,6 +100,8 @@ def histogram(lane):
     left_lane_inds = []
     right_lane_inds = []
     l_count, r_count = 0, 0 # 현재 왼쪽인지 오른쪽인지 구분하기 위한 변수.
+    pre_leftx, pre_rightx = 0, 0 
+    dxl, dxr = 0, 0
     color_out = np.dstack((lane, lane, lane)) * 255
 
     
@@ -125,22 +128,12 @@ def histogram(lane):
 
         if len(good_left_inds) > minpix:
             leftx_current = int(np.mean(nz[1][good_left_inds]))
-            l_count+=1
+
 
         if len(good_right_inds) > minpix:
             rightx_current = int(np.mean(nz[1][good_right_inds]))
-            r_count+=1
 
-        if len(good_left_inds) < minpix:
-            if len(good_right_inds) > minpix:
-                leftx_current = rightx_current - LANE_WIDTH
-
-        if len(good_right_inds) < minpix:
-            if len(good_left_inds) > minpix:
-                rightx_current = leftx_current + LANE_WIDTH
-
-
-
+            
 
         lx.append(leftx_current)
         ly.append((win_y_low + win_y_high)/2)
@@ -255,10 +248,13 @@ def drive(angle, speed):
 # 차선 따라가기 메인 로직
 #=============================================
 def lane_follow():
-    global left_state, right_state, left_flag, right_flag
+    global left_state, right_state, left_flag, right_flag, prev_time
     raw_img = image.copy()
 
-    
+    curr_time = time.time()
+    fps = 1 / (curr_time - prev_time)
+    prev_time = curr_time
+
     hsv = cv2.cvtColor(raw_img, cv2.COLOR_BGR2HSV)
     mask_y = cv2.inRange(hsv, LOW_YELLOW, HIGH_YELLOW)
     mask_w = cv2.inRange(hsv, LOW_WHITE, HIGH_WHITE)
@@ -268,6 +264,9 @@ def lane_follow():
 
     pts = SOURCE_POINTS.reshape((-1, 1, 2)).astype(np.int32)
     cv2.polylines(raw_img, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
+
+    cv2.putText(raw_img, f"FPS: {fps:.2f}", (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     cv2.imshow("VViewer",raw_img)
     
     bird_view = cv2.warpPerspective(result, TRANSFORM_MATRIX, (WIDTH, HEIGHT)) #WSL 기준 0.8ms 걸림..
