@@ -35,7 +35,7 @@ image = np.empty(shape=[0])  # 카메라 이미지를 담을 변수
 bridge = CvBridge()
 motor = None  # 모터 토픽을 담을 변수
 lx, ly, rx, ry = [], [], [], []
-left_state,right_state = 0,0
+left_state, right_state = 1, 0
 #=============================================
 # 상수 선언부
 #=============================================
@@ -63,8 +63,8 @@ CONFIG_DEGREE = 1.0
 
 # 속도 설정
 STRAIGHT_VELO = 100
-TURN_VELO     = 55
-TURN_FASTVEL  = TURN_VELO + 30
+TURN_VELO     = 100
+TURN_FASTVEL  = TURN_VELO #+ 30
 
 # 카메라 및 이미지 크기
 CAM_FPS = 30
@@ -75,7 +75,7 @@ SOURCE_POINTS      = np.float32([[210, 300], [ 40, 438], [425, 300], [595, 453]]
 DESTINATION_POINTS = np.float32([[160,  10], [160, 470], [480,  10], [480, 470]])
 TRANSFORM_MATRIX   = cv2.getPerspectiveTransform(SOURCE_POINTS, DESTINATION_POINTS)
 window_height      = int(HEIGHT / nwindows)
-LANE_WIDTH = 320		    # BIRD_EYE_VIEW 를 통해 변환된 차선의 폭 값인 상수값을 저장하는 변수.
+LANE_WIDTH = 280		    # BIRD_EYE_VIEW 를 통해 변환된 차선의 폭 값인 상수값을 저장하는 변수.
 #=============================================
 # 카메라 토픽 콜백 함수
 #=============================================
@@ -96,9 +96,16 @@ def histogram(lane):
 
     nz = lane.nonzero()
     lx, ly, rx, ry = [], [], [], []
+    left_lane_inds = []
+    right_lane_inds = []
     l_count, r_count = 0, 0 # 현재 왼쪽인지 오른쪽인지 구분하기 위한 변수.
     color_out = np.dstack((lane, lane, lane)) * 255
-    for window in range(nwindows):
+
+    
+    #t0 = time.perf_counter()
+
+
+    for window in (range(nwindows)):
         win_y_low = lane.shape[0] - (window+1) * window_height
         win_y_high = lane.shape[0] - window * window_height
 
@@ -107,11 +114,14 @@ def histogram(lane):
         win_xrl = rightx_current - margin
         win_xrh = rightx_current + margin
 
-        cv2.rectangle(color_out, (win_xll, win_y_low),(win_xlh, win_y_high),(0,255,0),2)
+        cv2.rectangle(color_out, (win_xll, win_y_low),(win_xlh, win_y_high),(0,255,0),2) 
         cv2.rectangle(color_out, (win_xrl, win_y_low),(win_xrh, win_y_high),(0,255,0),2)
 
         good_left_inds  = ((nz[0]>=win_y_low)&(nz[0]<win_y_high)&(nz[1]>=win_xll)&(nz[1]<win_xlh)).nonzero()[0]
         good_right_inds = ((nz[0]>=win_y_low)&(nz[0]<win_y_high)&(nz[1]>=win_xrl)&(nz[1]<win_xrh)).nonzero()[0]
+
+        left_lane_inds.append(good_left_inds)
+        right_lane_inds.append(good_right_inds)
 
         if len(good_left_inds) > minpix:
             leftx_current = int(np.mean(nz[1][good_left_inds]))
@@ -121,38 +131,41 @@ def histogram(lane):
             rightx_current = int(np.mean(nz[1][good_right_inds]))
             r_count+=1
 
+        if len(good_left_inds) < minpix:
+            if len(good_right_inds) > minpix:
+                leftx_current = rightx_current - LANE_WIDTH
 
-        if (r_count>l_count): #만약 오른쪽의 차선이 왼쪽보다 많다면 지금 오른쪽 차선에 있다는 것.
-            right_state = True
-            left_state = False
-            #print("R")
+        if len(good_right_inds) < minpix:
+            if len(good_left_inds) > minpix:
+                rightx_current = leftx_current + LANE_WIDTH
 
-        elif (r_count<l_count):
-            left_state = True
-            right_state = False
-            #print("L")
+
+
 
         lx.append(leftx_current)
         ly.append((win_y_low + win_y_high)/2)
         rx.append(rightx_current)
         ry.append((win_y_low + win_y_high)/2)
+        #print(lx,ly,rx,ry)
 
+
+    #t1 = time.perf_counter()
+    #print(f" Histogram: {(t1-t0)*1000:.2f} ms")
     # 시각화
+
+    # 배열을 1차원으로 합침
+    left_lane_inds = np.concatenate(left_lane_inds)
+    right_lane_inds = np.concatenate(right_lane_inds)
+    #print (lx,rx)
     
-    left_lane_inds  = np.concatenate([((nz[0]>=lane.shape[0] - (i+1)*window_height)&
-                                     (nz[0]< lane.shape[0] - i*window_height)&
-                                     (nz[1]>=(lx[i]-margin))&(nz[1]<=(lx[i]+margin))).nonzero()[0]
-                                     for i in range(nwindows)])
-    right_lane_inds = np.concatenate([((nz[0]>=lane.shape[0] - (i+1)*window_height)&
-                                     (nz[0]< lane.shape[0] - i*window_height)&
-                                     (nz[1]>=(rx[i]-margin))&(nz[1]<=(rx[i]+margin))).nonzero()[0]
-                                     for i in range(nwindows)])
-
-
 
     color_out[nz[0][left_lane_inds], nz[1][left_lane_inds]]   = [255,0,0]
     color_out[nz[0][right_lane_inds],nz[1][right_lane_inds]]   = [0,0,255]
     cv2.imshow("viewer", color_out)
+
+    
+    
+
 
 #=============================================
 # 차선 기울기·조향 제어 설정
@@ -256,8 +269,9 @@ def lane_follow():
     pts = SOURCE_POINTS.reshape((-1, 1, 2)).astype(np.int32)
     cv2.polylines(raw_img, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
     cv2.imshow("VViewer",raw_img)
+    
+    bird_view = cv2.warpPerspective(result, TRANSFORM_MATRIX, (WIDTH, HEIGHT)) #WSL 기준 0.8ms 걸림..
 
-    bird_view = cv2.warpPerspective(result, TRANSFORM_MATRIX, (WIDTH, HEIGHT))
     L = cv2.cvtColor(bird_view, cv2.COLOR_BGR2HLS)[:,:,1]
     _, lane = cv2.threshold(L, lane_bin_th, 255, cv2.THRESH_BINARY)
     cv2.waitKey(1)
