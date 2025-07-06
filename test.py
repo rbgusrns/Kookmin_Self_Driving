@@ -50,7 +50,7 @@ HIGH_WHITE = np.array([0, 0, 255])
 
 # SLIDING WINDOW용 상수
 nwindows = 8
-margin    = 80
+margin    = 40
 minpix    = 5
 lane_bin_th = 80
 
@@ -69,20 +69,32 @@ TURN_FASTVEL  = TURN_VELO + 30
 
 # 카메라 및 이미지 크기
 CAM_FPS = 30
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 320, 240
 
 # 원근 변환 행렬 미리 계산
-SOURCE_POINTS      = np.float32([[210, 300], [ 40, 438], [425, 300], [595, 453]])
-DESTINATION_POINTS = np.float32([[160,  10], [160, 470], [480,  10], [480, 470]])
+SOURCE_POINTS = np.float32([
+    [105.0, 150.0],
+    [20.0, 219.0],
+    [212.5, 150.0],
+    [297.5, 226.5]
+])
+
+DESTINATION_POINTS = np.float32([
+    [80.0, 5.0],
+    [80.0, 235.0],
+    [240.0, 5.0],
+    [240.0, 235.0]
+])
 TRANSFORM_MATRIX   = cv2.getPerspectiveTransform(SOURCE_POINTS, DESTINATION_POINTS)
 window_height      = int(HEIGHT / nwindows)
-LANE_WIDTH = 280		    # BIRD_EYE_VIEW 를 통해 변환된 차선의 폭 값인 상수값을 저장하는 변수.
+LANE_WIDTH = 140		    # BIRD_EYE_VIEW 를 통해 변환된 차선의 폭 값인 상수값을 저장하는 변수.
 #=============================================
 # 카메라 토픽 콜백 함수
 #=============================================
 def img_callback(data):
     global image
     image = bridge.imgmsg_to_cv2(data, "bgr8")
+    image = cv2.resize(image, (320, 240))
 
 #=============================================
 # 히스토그램 기반 차선 검출
@@ -175,7 +187,7 @@ def Steer_Configuration():
         rx = [WIDTH] * len(rx)
 
     # 차선의 없음을 인식하는 코드. 왼쪽 차선의 x 값들의 합이 0 또는 오른쪽 차선의 x 값들의 합이 640인 경우에 empty_line_flag = ON.
-    empty_line_flag = 1 if sum(lx) == 0  or sum(rx)/len(rx) == (WIDTH/2) else 0
+    empty_line_flag = 1 if sum(lx) == 0  or sum(rx)/len(rx) == (WIDTH) else 0
     
 	# 차선의 겹쳐짐을 인식하는 코드. 왼쪽 차선의 x 값>과 오른쪽 차선의 x 값이 같은 경우 fusion_line_flag = ON.
     fusion_line_flag = 1 if lx == rx else 0
@@ -197,7 +209,7 @@ def Steer_Configuration():
             rx[START_BOX] = lx[START_BOX] + LANE_WIDTH 
 
         # 차선이 모두 인식되지 않는 상황.
-        elif (sum(lx)/len(lx)) == 0  and ((sum(rx)/len(rx)) == (WIDTH/2)) : 
+        elif (sum(lx)/len(lx)) == 0  and ((sum(rx)/len(rx)) == (WIDTH)) : 
             # 왼쪽 차선과 오른쪽 차선의 값을 조정해 직선으로 주행하도록 함 
             lx = [160] * len(lx)
             rx = [480] * len(rx)
@@ -240,7 +252,7 @@ def PD_Control():
 def drive(angle, speed):
     global motor
     msg = XycarMotor()
-    msg.angle = angle
+    msg.angle = angle*3
     msg.speed = speed
     motor.publish(msg)
 
