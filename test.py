@@ -252,7 +252,7 @@ def PD_Control():
 def drive(angle, speed):
     global motor
     msg = XycarMotor()
-    msg.angle = angle*3
+    msg.angle = angle*2
     msg.speed = speed
     motor.publish(msg)
 
