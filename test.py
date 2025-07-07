@@ -35,7 +35,7 @@ image = np.empty(shape=[0])  # 카메라 이미지를 담을 변수
 bridge = CvBridge()
 motor = None  # 모터 토픽을 담을 변수
 lx, ly, rx, ry = [], [], [], []
-left_state, right_state = 1, 0
+left_state, right_state = 0, 0
 prev_time = 0
 #=============================================
 # 상수 선언부
@@ -64,7 +64,7 @@ CONFIG_DEGREE = 1.0
 
 # 속도 설정
 STRAIGHT_VELO = 100
-TURN_VELO     = 55
+TURN_VELO     = 70
 TURN_FASTVEL  = TURN_VELO + 30
 
 # 카메라 및 이미지 크기
